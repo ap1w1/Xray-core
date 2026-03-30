@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -26,6 +27,28 @@ import (
 )
 
 var errSniffingTimeout = errors.New("timeout on sniffing")
+
+func logSniffingFailure(ctx context.Context, destination net.Destination, err error) {
+	inbound := session.InboundFromContext(ctx)
+	sourceIP := "-"
+	userEmail := "-"
+	if inbound != nil {
+		if inbound.Source.IsValid() {
+			sourceIP = inbound.Source.Address.String()
+		}
+		if inbound.User != nil && inbound.User.Email != "" {
+			userEmail = inbound.User.Email
+		}
+	}
+	errors.LogWarning(ctx, fmt.Sprintf(
+		"sniffing error; ip=%s email=%s time=%s request=%s error=%v",
+		sourceIP,
+		userEmail,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		destination.String(),
+		err,
+	))
+}
 
 type cachedReader struct {
 	sync.Mutex
@@ -309,6 +332,8 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 			result, err := sniffer(ctx, cReader, sniffingRequest.MetadataOnly, destination.Network)
 			if err == nil {
 				content.Protocol = result.Protocol()
+			} else {
+				logSniffingFailure(ctx, destination, err)
 			}
 			if err == nil && d.shouldOverride(ctx, result, sniffingRequest, destination) {
 				domain := result.Domain()
@@ -364,6 +389,8 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 		result, err := sniffer(ctx, cReader, sniffingRequest.MetadataOnly, destination.Network)
 		if err == nil {
 			content.Protocol = result.Protocol()
+		} else {
+			logSniffingFailure(ctx, destination, err)
 		}
 		if err == nil && d.shouldOverride(ctx, result, sniffingRequest, destination) {
 			domain := result.Domain()

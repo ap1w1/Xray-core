@@ -69,9 +69,16 @@ func (s *statsServer) GetStatsOnlineIpList(ctx context.Context, request *GetStat
 		return nil, status.Error(codes.NotFound, request.Name+" not found.")
 	}
 
-	ips := make(map[string]int64)
-	for ip, t := range c.IPTimeMap() {
-		ips[ip] = t.Unix()
+	var ips map[string]int64
+	// Fast path for built-in implementation to avoid iterating over potentially
+	// mutable maps from third-party stats backends.
+	if concrete, ok := c.(*stats.OnlineMap); ok {
+		ips = concrete.IPUnixMap()
+	} else {
+		ips = make(map[string]int64)
+		for ip, t := range c.IPTimeMap() {
+			ips[ip] = t.Unix()
+		}
 	}
 
 	return &GetStatsOnlineIpListResponse{

@@ -97,3 +97,16 @@ func (om *OnlineMap) IPTimeMap() map[string]time.Time {
 	}
 	return result
 }
+
+// IPUnixMap returns a snapshot copy of IPs to their last-seen unix timestamps.
+// This helper avoids exposing internal maps to callers that only need integer timestamps.
+func (om *OnlineMap) IPUnixMap() map[string]int64 {
+	om.access.Lock()
+	defer om.access.Unlock()
+
+	result := make(map[string]int64, len(om.entries))
+	for ip, e := range om.entries {
+		result[ip] = e.lastSeen.Unix()
+	}
+	return result
+}

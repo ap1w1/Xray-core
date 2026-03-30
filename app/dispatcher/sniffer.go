@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/errors"
@@ -63,7 +64,14 @@ func (s *Sniffer) Sniff(c context.Context, payload []byte, network net.Network) 
 		if si.metadataSniffer || si.network != network {
 			continue
 		}
-		result, err := protocolSniffer(c, payload)
+		result, err := func() (result SniffResult, err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = errors.New(fmt.Sprintf("sniffer panic recovered: %v", recovered))
+				}
+			}()
+			return protocolSniffer(c, payload)
+		}()
 		if err == common.ErrNoClue {
 			pendingSniffer = append(pendingSniffer, si)
 			continue
@@ -93,7 +101,14 @@ func (s *Sniffer) SniffMetadata(c context.Context) (SniffResult, error) {
 			pendingSniffer = append(pendingSniffer, si)
 			continue
 		}
-		result, err := s(c, nil)
+		result, err := func() (result SniffResult, err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = errors.New(fmt.Sprintf("metadata sniffer panic recovered: %v", recovered))
+				}
+			}()
+			return s(c, nil)
+		}()
 		if err == common.ErrNoClue {
 			pendingSniffer = append(pendingSniffer, si)
 			continue

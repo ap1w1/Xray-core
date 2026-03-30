@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"io"
+	"math"
 
 	"github.com/apernet/quic-go/quicvarint"
 	"github.com/xtls/xray-core/common"
@@ -104,8 +105,12 @@ func SniffQUIC(b []byte) (*SniffHeader, error) {
 			if err != nil || tokenLen > uint64(len(b)) {
 				return nil, errNotQuic
 			}
+			tokenLen32, ok := uint64ToInt32(tokenLen)
+			if !ok {
+				return nil, errNotQuic
+			}
 
-			if _, err = buffer.ReadBytes(int32(tokenLen)); err != nil {
+			if _, err = buffer.ReadBytes(tokenLen32); err != nil {
 				return nil, errNotQuic
 			}
 		}
@@ -220,7 +225,18 @@ func SniffQUIC(b []byte) (*SniffHeader, error) {
 				if err != nil || length > uint64(buffer.Len()) {
 					return nil, io.ErrUnexpectedEOF
 				}
-				currentCryptoLen := int32(offset + length)
+				offset32, ok := uint64ToInt32(offset)
+				if !ok {
+					return nil, io.ErrUnexpectedEOF
+				}
+				length32, ok := uint64ToInt32(length)
+				if !ok {
+					return nil, io.ErrUnexpectedEOF
+				}
+				if offset32 > math.MaxInt32-length32 {
+					return nil, io.ErrUnexpectedEOF
+				}
+				currentCryptoLen := offset32 + length32
 				if cryptoLen < currentCryptoLen {
 					if cryptoDataBuf.Cap() < currentCryptoLen {
 						return nil, io.ErrShortBuffer
@@ -228,7 +244,7 @@ func SniffQUIC(b []byte) (*SniffHeader, error) {
 					cryptoDataBuf.Extend(currentCryptoLen - cryptoLen)
 					cryptoLen = currentCryptoLen
 				}
-				if _, err := buffer.Read(cryptoDataBuf.BytesRange(int32(offset), currentCryptoLen)); err != nil { // Field: Crypto Data
+				if _, err := buffer.Read(cryptoDataBuf.BytesRange(offset32, currentCryptoLen)); err != nil { // Field: Crypto Data
 					return nil, io.ErrUnexpectedEOF
 				}
 			case 0x1c: // CONNECTION_CLOSE frame, only 0x1c is permitted in initial packet
@@ -242,7 +258,11 @@ func SniffQUIC(b []byte) (*SniffHeader, error) {
 				if err != nil {
 					return nil, io.ErrUnexpectedEOF
 				}
-				if _, err := buffer.ReadBytes(int32(length)); err != nil { // Field: Reason Phrase
+				length32, ok := uint64ToInt32(length)
+				if !ok {
+					return nil, io.ErrUnexpectedEOF
+				}
+				if _, err := buffer.ReadBytes(length32); err != nil { // Field: Reason Phrase
 					return nil, io.ErrUnexpectedEOF
 				}
 			default:
@@ -264,6 +284,13 @@ func SniffQUIC(b []byte) (*SniffHeader, error) {
 	}
 	// All payload is parsed as valid QUIC packets, but we need more packets for crypto data to read client hello.
 	return nil, protocol.ErrProtoNeedMoreData
+}
+
+func uint64ToInt32(v uint64) (int32, bool) {
+	if v > math.MaxInt32 {
+		return 0, false
+	}
+	return int32(v), true
 }
 
 func hkdfExpandLabel(hash crypto.Hash, secret, context []byte, label string, length int) []byte {

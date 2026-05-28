@@ -3,6 +3,7 @@ package hysteria
 import (
 	"context"
 	"io"
+	stdnet "net"
 	"time"
 
 	"github.com/xtls/xray-core/common"
@@ -15,6 +16,7 @@ import (
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/policy"
 	"github.com/xtls/xray-core/features/routing"
+	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/proxy/hysteria/account"
 	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet/hysteria"
@@ -25,6 +27,7 @@ type Server struct {
 	config        *ServerConfig
 	validator     *account.Validator
 	policyManager policy.Manager
+	statsManager  stats.Manager
 }
 
 func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
@@ -46,8 +49,42 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		validator:     validator,
 		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
 	}
+	if statsFeature := v.GetFeature(stats.ManagerType()); statsFeature != nil {
+		s.statsManager = statsFeature.(stats.Manager)
+	}
 
 	return s, nil
+}
+
+func remoteIPString(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	host, _, err := stdnet.SplitHostPort(addr.String())
+	if err == nil {
+		return host
+	}
+	return addr.String()
+}
+
+func (s *Server) trackOnlineUser(ctx context.Context, useremail string, userlevel uint32, conn stat.Connection) func() {
+	if useremail == "" || s.statsManager == nil {
+		return nil
+	}
+	if !s.policyManager.ForLevel(userlevel).Stats.UserOnline {
+		return nil
+	}
+	userIP := remoteIPString(conn.RemoteAddr())
+	if userIP == "" {
+		return nil
+	}
+	name := "user>>>" + useremail + ">>>online"
+	om, _ := stats.GetOrRegisterOnlineMap(s.statsManager, name)
+	if om == nil {
+		return nil
+	}
+	om.AddIP(userIP)
+	return func() { om.RemoveIP(userIP) }
 }
 
 func (s *Server) HysteriaInboundValidator() *account.Validator {
@@ -92,6 +129,9 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 			useremail = inbound.User.Email
 			userlevel = inbound.User.Level
 		}
+	}
+	if stopTracking := s.trackOnlineUser(ctx, useremail, userlevel, conn); stopTracking != nil {
+		defer stopTracking()
 	}
 
 	iConn := stat.TryUnwrapStatsConn(conn)

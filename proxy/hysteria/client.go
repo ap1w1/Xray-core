@@ -181,7 +181,7 @@ type UDPWriter struct {
 func (w *UDPWriter) sendMsg(msg *UDPMessage) error {
 	msgN := msg.Serialize(w.buf)
 	if msgN < 0 {
-		return nil
+		return errors.New("UDP message is too large for hysteria buffer")
 	}
 	_, err := w.Writer.Write(w.buf[:msgN])
 	return err
@@ -213,7 +213,12 @@ func (w *UDPWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 		var errTooLarge *quic.DatagramTooLargeError
 		if go_errors.As(err, &errTooLarge) {
 			msg.PacketID = uint16(rand.Intn(0xFFFF)) + 1
-			fMsgs := FragUDPMessage(msg, int(errTooLarge.MaxDatagramPayloadSize))
+			fMsgs, err := FragUDPMessage(msg, int(errTooLarge.MaxDatagramPayloadSize))
+			if err != nil {
+				b.Release()
+				buf.ReleaseMulti(mb)
+				return err
+			}
 			for _, fMsg := range fMsgs {
 				err := w.sendMsg(&fMsg)
 				if err != nil {

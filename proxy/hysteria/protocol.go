@@ -173,7 +173,7 @@ func (m *UDPMessage) Serialize(buf []byte) int {
 	if len(buf) < m.Size() {
 		return -1
 	}
-	// binary.BigEndian.PutUint32(buf, m.SessionID)
+	binary.BigEndian.PutUint32(buf, m.SessionID)
 	binary.BigEndian.PutUint16(buf[4:], m.PacketID)
 	buf[6] = m.FragID
 	buf[7] = m.FragCount
@@ -202,7 +202,7 @@ func ParseUDPMessage(msg []byte) (*UDPMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if lAddr == 0 || lAddr > MaxMessageLength {
+	if lAddr == 0 || lAddr > MaxAddressLength {
 		return nil, errors.New("invalid address length")
 	}
 	bs := buf.Bytes()
